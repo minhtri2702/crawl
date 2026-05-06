@@ -1,0 +1,7 @@
+selenium==4.27.1
+webdriver-manager==4.0.2
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+python-dotenv==1.0.1
+requests==2.32.3
+apscheduler==3.10.4

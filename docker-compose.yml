@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: crawler-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crawler_db
+      POSTGRES_USER: crawler_admin
+      POSTGRES_PASSWORD: "0000"
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crawler_admin -d crawler_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manga-crawler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database Configuration
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: crawler_db
+      DB_USER: crawler_admin
+      DB_PASSWORD: "0000"
+      # Crawler Configuration
+      CRAWLER_BASE_URL: https://truyenqqno.com
+      CRAWLER_START_PAGE: "1"
+      CRAWLER_MAX_PAGES: "5"
+      CRAWLER_HEADLESS: "true"
+      CRAWLER_PAGE_LOAD_TIMEOUT: "30"
+      CRAWLER_RETRY_MAX_ATTEMPTS: "3"
+      CRAWLER_RETRY_DELAY: "5"
+      # Image Configuration
+      IMAGE_SAVE_PATH: ./data/images
+      # Logging Configuration
+      LOG_LEVEL: INFO
+      LOG_FILE: ./logs/crawler.log
+    volumes:
+      - crawler_data:/app/data
+      - crawler_logs:/app/logs
+    # Override command to run in scheduled mode
+    command: ["python", "main.py", "--mode", "scheduled"]
+
+volumes:
+  postgres_data:
+    name: crawler-postgres-data
+  crawler_data:
+    name: crawler-data
+  crawler_logs:
+    name: crawler-logs
