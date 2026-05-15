@@ -14,7 +14,7 @@ import argparse
 
 from dotenv import load_dotenv
 
-# Load environment variables before any other imports
+# Load environment variables if .env exists (for development), but don't require it
 load_dotenv()
 
 from utils.logging_setup import setup_logging

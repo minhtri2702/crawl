@@ -19,6 +19,8 @@ import os
 import re
 import time
 import logging
+import concurrent.futures
+import threading
 from typing import Optional
 
 import requests
@@ -39,6 +41,10 @@ from db.session import SessionLocal
 from models.manga import Manga
 from models.chapter import Chapter, ChapterImage
 from models.crawl_error_log import CrawlErrorLog
+
+
+# Thread-local storage for WebDriver instances
+_thread_local = threading.local()
 
 
 logger = logging.getLogger(__name__)
@@ -114,13 +120,19 @@ class ChapterImageCrawler:
                     .all()
                 )
             else:
-                mangas = db.query(Manga).order_by(Manga.stt).all()
+                mangas = db.query(Manga).order_by(Manga.stt.desc()).all()
 
             logger.info(
                 "Starting chapter image crawl for %d manga", len(mangas)
             )
 
             for manga in mangas:
+                # Rollback any leftover failed transaction before processing next manga
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
                 try:
                     manga_slug = slugify(manga.title)
                     logger.info(
@@ -247,6 +259,11 @@ class ChapterImageCrawler:
                                 e,
                             )
                             stats["errors"] += 1
+                            # Rollback to clear the failed transaction
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
                             continue
 
                     # Update max_chapter_crawled after processing all chapters
@@ -273,6 +290,11 @@ class ChapterImageCrawler:
                         "Error processing manga '%s': %s", manga.title, e
                     )
                     stats["errors"] += 1
+                    # Rollback to clear the failed transaction
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                     continue
 
         finally:
@@ -452,8 +474,9 @@ class ChapterImageCrawler:
             db.add(chapter_record)
             db.flush()  # Get the ID
 
-        # Download each image in order and save to DB
+        # Download images in parallel using ThreadPoolExecutor
         downloaded = 0
+        download_tasks = []
         for idx, img_url in enumerate(image_urls):
             page_num = idx + 1
             ext = self._get_extension(img_url)
@@ -484,19 +507,6 @@ class ChapterImageCrawler:
                 )
                 downloaded += 1
                 # Still save to DB if not there
-                if not existing_image:
-                    chapter_image = ChapterImage(
-                        chapter_id=chapter_record.id,
-                        image_url=img_url,
-                        image_path=filepath,
-                        page_order=page_num,
-                    )
-                    db.add(chapter_image)
-                continue
-
-            if self._download_image(img_url, filepath, page_num):
-                downloaded += 1
-                # Save to DB
                 chapter_image = ChapterImage(
                     chapter_id=chapter_record.id,
                     image_url=img_url,
@@ -504,6 +514,35 @@ class ChapterImageCrawler:
                     page_order=page_num,
                 )
                 db.add(chapter_image)
+                continue
+
+            download_tasks.append((img_url, filepath, page_num))
+
+        # Download remaining images in parallel
+        if download_tasks:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                future_to_info = {
+                    executor.submit(self._download_image, url, path, num): (url, path, num)
+                    for url, path, num in download_tasks
+                }
+                for future in concurrent.futures.as_completed(future_to_info):
+                    img_url, filepath, page_num = future_to_info[future]
+                    try:
+                        if future.result():
+                            downloaded += 1
+                            chapter_image = ChapterImage(
+                                chapter_id=chapter_record.id,
+                                image_url=img_url,
+                                image_path=filepath,
+                                page_order=page_num,
+                            )
+                            db.add(chapter_image)
+                    except Exception as e:
+                        logger.error(
+                            "  Failed to download image %d: %s",
+                            page_num,
+                            e,
+                        )
 
         # Commit all image records for this chapter
         try:
@@ -514,12 +553,18 @@ class ChapterImageCrawler:
                 chapter_number,
             )
         except Exception as e:
-            db.rollback()
+            try:
+                db.rollback()
+            except Exception:
+                pass
             logger.error(
                 "  Failed to save image records to DB for chapter %d: %s",
                 chapter_number,
                 e,
             )
+            # Even if DB commit fails, images are saved on disk.
+            # Return 0 so caller knows DB save failed and can retry later.
+            downloaded = 0
 
         logger.info(
             "  Downloaded %d/%d images for chapter %d",
