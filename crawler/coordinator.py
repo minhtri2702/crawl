@@ -34,7 +34,7 @@ class CrawlerCoordinator:
 
     def __init__(
         self,
-        base_url: str = "https://truyenqqno.com",
+        base_url: str = "https://truyenqqko.com",
         start_page: int = 1,
         max_pages: int = 5,
         headless: bool = True,

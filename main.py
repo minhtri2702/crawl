@@ -42,7 +42,7 @@ def run_crawler(max_pages: int = None, start_page: int = None, reverse: bool = F
     Returns:
         Dict with crawling statistics.
     """
-    base_url = os.getenv("CRAWLER_BASE_URL", "https://truyenqqno.com")
+    base_url = os.getenv("CRAWLER_BASE_URL", "https://truyenqqko.com")
     if start_page is None:
         start_page = int(os.getenv("CRAWLER_START_PAGE", "1"))
     if max_pages is None:
@@ -82,7 +82,7 @@ def run_chapter_image_crawl(
     Returns:
         Dict with crawling statistics.
     """
-    base_url = os.getenv("CRAWLER_BASE_URL", "https://truyenqqno.com")
+    base_url = os.getenv("CRAWLER_BASE_URL", "https://truyenqqko.com")
     page_load_timeout = int(os.getenv("CRAWLER_PAGE_LOAD_TIMEOUT", "30"))
     data_path = os.getenv("DATA_PATH", "./data")
 
@@ -247,7 +247,7 @@ def run_scheduled() -> None:
 def main() -> None:
     """Main entry point with argument parsing."""
     parser = argparse.ArgumentParser(
-        description="Manga Crawler - Scrapes manga data from truyenqqno.com"
+        description="Manga Crawler - Scrapes manga data from truyenqqko.com"
     )
     parser.add_argument(
         "--mode",

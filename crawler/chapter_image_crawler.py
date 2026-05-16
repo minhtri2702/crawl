@@ -64,7 +64,7 @@ class ChapterImageCrawler:
     def __init__(
         self,
         driver: WebDriver,
-        base_url: str = "https://truyenqqno.com",
+        base_url: str = "https://truyenqqko.com",
         data_path: str = "./data",
         page_load_timeout: int = 30,
         minio_service: Optional[MinioService] = None,

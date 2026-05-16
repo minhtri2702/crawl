@@ -28,7 +28,7 @@ class ListingCrawler:
     Extracts manga title, detail URL, cover image URL, and latest chapter number.
     """
 
-    def __init__(self, driver: WebDriver, base_url: str = "https://truyenqqno.com"):
+    def __init__(self, driver: WebDriver, base_url: str = "https://truyenqqko.com"):
         self.driver = driver
         self.base_url = base_url
 
@@ -122,7 +122,7 @@ class ListingCrawler:
         """
         Extract manga data from a single listing item element.
 
-        Expected structure (truyenqqno.com):
+        Expected structure (truyenqqko.com):
         - Title: .book_name h3 a
         - URL: href from title link
         - Cover: .book_avatar img

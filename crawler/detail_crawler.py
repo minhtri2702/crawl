@@ -28,7 +28,7 @@ class DetailCrawler:
     Extracts full manga metadata and chapter list.
     """
 
-    def __init__(self, driver: WebDriver, base_url: str = "https://truyenqqno.com"):
+    def __init__(self, driver: WebDriver, base_url: str = "https://truyenqqko.com"):
         self.driver = driver
         self.base_url = base_url
 

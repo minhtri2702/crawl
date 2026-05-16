@@ -1,10 +1,14 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Sequence for manga STT (allows concurrent inserts from multiple crawlers)
+CREATE SEQUENCE IF NOT EXISTS manga_stt_seq START 1;
+
 -- Manga table
 CREATE TABLE IF NOT EXISTS manga (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    stt SERIAL UNIQUE,
+    stt INTEGER NOT NULL DEFAULT nextval('manga_stt_seq') UNIQUE,
+
     title VARCHAR(500) NOT NULL,
     url VARCHAR(1000) NOT NULL UNIQUE,
     cover_image_path VARCHAR(1000),
