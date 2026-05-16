@@ -1,7 +1,10 @@
 """
 Image service for downloading and storing cover images.
-Images are stored in: data/{slug}/{slug}.{ext}
+Images are uploaded directly to MinIO (no local storage).
+Path on MinIO: {slug}/{slug}.{ext}
 """
+
+from __future__ import annotations
 
 import os
 import logging
@@ -10,6 +13,7 @@ from typing import Optional
 import requests
 
 from utils.helpers import slugify
+from services.minio_service import MinioService
 
 logger = logging.getLogger(__name__)
 
@@ -17,39 +21,41 @@ logger = logging.getLogger(__name__)
 class ImageService:
     """Service for downloading and managing cover images."""
 
-    def __init__(self, base_path: str = "./data"):
+    def __init__(self, base_path: str = "./data", minio_service: Optional[MinioService] = None):
         self.base_path = base_path
+        self.minio = minio_service
         os.makedirs(self.base_path, exist_ok=True)
 
     def download_cover_image(self, image_url: str, title: str) -> Optional[str]:
         """
-        Download a cover image and save it to data/{slug}/{slug}.{ext}.
+        Download a cover image and upload directly to MinIO.
+        Does NOT save to local disk.
 
         Args:
             image_url: The URL of the cover image to download.
-            title: The manga title used to generate the folder and filename.
+            title: The manga title used to generate the filename on MinIO.
 
         Returns:
-            The relative path to the saved image (e.g. data/one-piece/one-piece.jpg),
+            The MinIO object path (e.g. one-piece/one-piece.jpg),
             or None on failure.
         """
         if not image_url:
             logger.warning("No image URL provided for '%s'", title)
             return None
 
+        if not self.minio:
+            logger.warning("MinIO not configured, skipping cover download for '%s'", title)
+            return None
+
         try:
             slug = slugify(title)
-            manga_dir = os.path.join(self.base_path, slug)
-            os.makedirs(manga_dir, exist_ok=True)
-
             ext = self._get_extension(image_url)
-            filename = f"{slug}{ext}"
-            filepath = os.path.join(manga_dir, filename)
+            minio_object = f"{slug}/{slug}{ext}"
 
-            # Skip if file already exists
-            if os.path.exists(filepath):
-                logger.info("Cover already exists, skipping: %s", filepath)
-                return filepath
+            # Check if already exists on MinIO
+            if self.minio.object_exists(minio_object):
+                logger.info("Cover already exists on MinIO, skipping: %s", minio_object)
+                return minio_object
 
             # Download the image
             logger.info("Downloading cover image: %s", image_url)
@@ -70,13 +76,15 @@ class ImageService:
             )
             response.raise_for_status()
 
-            # Save the image
-            with open(filepath, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            # Upload directly to MinIO from memory
+            self.minio.upload_bytes(
+                data=response.content,
+                object_name=minio_object,
+                content_type=f"image/{ext.lstrip('.')}",
+            )
+            logger.info("Cover uploaded to MinIO: %s", minio_object)
 
-            logger.info("Cover saved: %s", filepath)
-            return filepath
+            return minio_object
 
         except requests.RequestException as e:
             logger.error(
@@ -86,9 +94,9 @@ class ImageService:
                 e,
             )
             return None
-        except OSError as e:
+        except Exception as e:
             logger.error(
-                "Failed to save cover image for '%s': %s",
+                "Failed to upload cover for '%s': %s",
                 title,
                 e,
             )

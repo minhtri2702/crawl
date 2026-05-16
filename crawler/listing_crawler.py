@@ -3,6 +3,8 @@ Listing page crawler.
 Scrapes manga data from the listing page (truyen-moi-cap-nhat).
 """
 
+from __future__ import annotations
+
 import logging
 import re
 from typing import Optional

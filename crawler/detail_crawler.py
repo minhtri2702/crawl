@@ -3,6 +3,8 @@ Detail page crawler.
 Scrapes manga detail page for full metadata and chapter list.
 """
 
+from __future__ import annotations
+
 import logging
 import re
 from typing import Optional

@@ -31,8 +31,8 @@ services:
         condition: service_healthy
     environment:
       # Database Configuration
-      DB_HOST: postgres
-      DB_PORT: "5432"
+      DB_HOST: 100.94.58.103
+      DB_PORT: "5433"
       DB_NAME: crawler_db
       DB_USER: crawler_admin
       DB_PASSWORD: "0000"

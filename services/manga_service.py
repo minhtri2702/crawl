@@ -3,6 +3,8 @@ Manga service for database operations.
 Handles CRUD operations for manga, chapters, and genres.
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Optional
 from uuid import UUID
@@ -235,8 +237,12 @@ class MangaService:
                     manga_id,
                     e,
                 )
-                # Rollback the failed insert but keep the session usable
+                # Rollback to clear the failed transaction state.
+                # The manga/genre data is still in the session's identity map
+                # and will be re-persisted on next flush/commit.
                 self.db.rollback()
+                # Re-add manga/genre objects to session so they get re-persisted
+                # on the next flush/commit
                 continue
 
         if new_chapters:

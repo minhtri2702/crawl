@@ -15,6 +15,8 @@ Strategy:
 5. Update manga.max_chapter_crawled after successful crawl
 """
 
+from __future__ import annotations
+
 import os
 import re
 import time
@@ -41,6 +43,7 @@ from db.session import SessionLocal
 from models.manga import Manga
 from models.chapter import Chapter, ChapterImage
 from models.crawl_error_log import CrawlErrorLog
+from services.minio_service import MinioService
 
 
 # Thread-local storage for WebDriver instances
@@ -64,11 +67,13 @@ class ChapterImageCrawler:
         base_url: str = "https://truyenqqno.com",
         data_path: str = "./data",
         page_load_timeout: int = 30,
+        minio_service: Optional[MinioService] = None,
     ):
         self.driver = driver
         self.base_url = base_url
         self.data_path = data_path
         self.page_load_timeout = page_load_timeout
+        self.minio = minio_service
 
     def crawl_all_manga_chapters(
         self,
@@ -522,7 +527,10 @@ class ChapterImageCrawler:
         if download_tasks:
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 future_to_info = {
-                    executor.submit(self._download_image, url, path, num): (url, path, num)
+                    executor.submit(
+                        self._download_image, url, path, num,
+                        manga_slug, chapter_number,
+                    ): (url, path, num)
                     for url, path, num in download_tasks
                 }
                 for future in concurrent.futures.as_completed(future_to_info):
@@ -728,15 +736,18 @@ class ChapterImageCrawler:
         return True
 
     def _download_image(
-        self, image_url: str, filepath: str, page_num: int
+        self, image_url: str, filepath: str, page_num: int,
+        manga_slug: str = None, chapter_number: int = None,
     ) -> bool:
         """
-        Download a single image.
+        Download a single image and upload to MinIO if configured.
 
         Args:
             image_url: The image URL to download.
             filepath: The local file path to save to.
             page_num: The page number (for logging).
+            manga_slug: Slugified manga title (for MinIO path).
+            chapter_number: Chapter number (for MinIO path).
 
         Returns:
             True if download succeeded, False otherwise.
@@ -770,6 +781,13 @@ class ChapterImageCrawler:
                     f.write(chunk)
 
             logger.debug("  Saved: %s", filepath)
+
+            # Upload to MinIO if configured
+            if self.minio and manga_slug and chapter_number:
+                minio_object = f"chapters/{manga_slug}/chap-{chapter_number}/{os.path.basename(filepath)}"
+                self.minio.upload_file(filepath, minio_object)
+                logger.debug("  Uploaded to MinIO: %s", minio_object)
+
             return True
 
         except requests.RequestException as e:

@@ -3,6 +3,8 @@ Crawler coordinator.
 Orchestrates the full crawling process: listing -> detail -> DB -> images.
 """
 
+from __future__ import annotations
+
 import os
 import logging
 from typing import Optional
@@ -14,6 +16,7 @@ from crawler.listing_crawler import ListingCrawler
 from crawler.detail_crawler import DetailCrawler
 from services.manga_service import MangaService
 from services.image_service import ImageService
+from services.minio_service import MinioService
 from db.session import SessionLocal, init_db
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,7 @@ class CrawlerCoordinator:
         headless: bool = True,
         page_load_timeout: int = 30,
         data_path: str = "./data",
+        reverse: bool = False,
     ):
         self.base_url = base_url
         self.start_page = start_page
@@ -44,6 +48,7 @@ class CrawlerCoordinator:
         self.headless = headless
         self.page_load_timeout = page_load_timeout
         self.data_path = data_path
+        self.reverse = reverse
 
         self.driver_factory = WebDriverFactory(
             headless=headless,
@@ -78,10 +83,20 @@ class CrawlerCoordinator:
             logger.info("Creating WebDriver...")
             self.driver = self.driver_factory.create_driver()
 
+            # Initialize MinIO service (optional)
+            minio_service = None
+            if os.getenv("MINIO_ENDPOINT"):
+                try:
+                    minio_service = MinioService()
+                    logger.info("MinIO service initialized: %s", os.getenv("MINIO_ENDPOINT"))
+                except Exception as e:
+                    logger.warning("Failed to initialize MinIO service: %s", e)
+                    minio_service = None
+
             # Initialize crawlers and services
             listing_crawler = ListingCrawler(self.driver, self.base_url)
             detail_crawler = DetailCrawler(self.driver, self.base_url)
-            image_service = ImageService(self.data_path)
+            image_service = ImageService(self.data_path, minio_service=minio_service)
 
             # Get database session
             db_session = SessionLocal()
@@ -90,7 +105,15 @@ class CrawlerCoordinator:
             try:
                 # Step 1: Crawl listing pages
                 all_listing_data = []
-                for page in range(self.start_page, self.start_page + self.max_pages):
+                if self.reverse:
+                    # Crawl from start_page down to 1
+                    page_range = range(self.start_page, 0, -1)
+                    if self.max_pages:
+                        page_range = range(self.start_page, max(self.start_page - self.max_pages, 0), -1)
+                else:
+                    page_range = range(self.start_page, self.start_page + self.max_pages)
+
+                for page in page_range:
                     try:
                         page_data = listing_crawler.crawl_page(page)
                         if not page_data:

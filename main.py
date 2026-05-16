@@ -21,6 +21,7 @@ from utils.logging_setup import setup_logging
 from crawler.coordinator import CrawlerCoordinator
 from crawler.chapter_image_crawler import ChapterImageCrawler
 from crawler.driver import WebDriverFactory
+from services.minio_service import MinioService
 from db.session import SessionLocal
 from models.manga import Manga
 from models.chapter import Chapter
@@ -29,13 +30,14 @@ from utils.helpers import slugify
 logger = logging.getLogger(__name__)
 
 
-def run_crawler(max_pages: int = None, start_page: int = None) -> dict:
+def run_crawler(max_pages: int = None, start_page: int = None, reverse: bool = False) -> dict:
     """
     Execute the manga metadata crawler with configuration from environment variables.
 
     Args:
         max_pages: Override max pages from .env
         start_page: Override start page from .env
+        reverse: If True, crawl pages in reverse order (from start_page down to 1)
 
     Returns:
         Dict with crawling statistics.
@@ -56,6 +58,7 @@ def run_crawler(max_pages: int = None, start_page: int = None) -> dict:
         headless=headless,
         page_load_timeout=page_load_timeout,
         data_path=data_path,
+        reverse=reverse,
     )
 
     stats = coordinator.run()
@@ -90,12 +93,23 @@ def run_chapter_image_crawl(
     )
     driver = driver_factory.create_driver()
 
+    # Initialize MinIO service (optional)
+    minio_service = None
+    if os.getenv("MINIO_ENDPOINT"):
+        try:
+            minio_service = MinioService()
+            logger.info("MinIO service initialized: %s", os.getenv("MINIO_ENDPOINT"))
+        except Exception as e:
+            logger.warning("Failed to initialize MinIO service: %s", e)
+            minio_service = None
+
     try:
         chapter_crawler = ChapterImageCrawler(
             driver=driver,
             base_url=base_url,
             data_path=data_path,
             page_load_timeout=page_load_timeout,
+            minio_service=minio_service,
         )
 
         # If manga_stt is specified, find the manga ID
@@ -183,10 +197,10 @@ def run_full_crawl(
     return combined
 
 
-def run_once() -> None:
+def run_once(reverse: bool = False) -> None:
     """Run the manga metadata crawler once and exit."""
     logger.info("Starting one-time crawl...")
-    stats = run_crawler()
+    stats = run_crawler(reverse=reverse)
 
     if stats.get("errors", 0) > 0:
         logger.warning("Crawl completed with %d errors", stats["errors"])
@@ -257,6 +271,11 @@ def main() -> None:
         type=int,
         default=None,
         help="Starting page number (overrides .env)",
+    )
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Crawl pages in reverse order (from start-page down to 1)",
     )
     parser.add_argument(
         "--chapters",
@@ -340,7 +359,7 @@ def main() -> None:
         logger.info("Full crawl completed successfully")
         sys.exit(0)
     elif args.mode == "once":
-        run_once()
+        run_once(reverse=args.reverse)
     else:
         run_scheduled()
 
