@@ -457,14 +457,22 @@ class ChapterImageCrawler:
         )
 
         # Find the chapter record in DB
+        # Try to find chapter by URL first (more reliable), then by manga_id + chapter_number
         chapter_record = (
             db.query(Chapter)
-            .filter(
-                Chapter.manga_id == manga.id,
-                Chapter.chapter_number == float(chapter_number),
-            )
+            .filter(Chapter.url == chapter_url)
             .first()
         )
+
+        if not chapter_record:
+            chapter_record = (
+                db.query(Chapter)
+                .filter(
+                    Chapter.manga_id == manga.id,
+                    Chapter.chapter_number == float(chapter_number),
+                )
+                .first()
+            )
 
         if not chapter_record:
             logger.warning(
@@ -479,7 +487,16 @@ class ChapterImageCrawler:
                 url=chapter_url,
             )
             db.add(chapter_record)
-            db.flush()  # Get the ID
+            try:
+                db.flush()  # Get the ID
+            except Exception:
+                db.rollback()
+                logger.error(
+                    "  Failed to create chapter %d for '%s'. URL may already exist.",
+                    chapter_number,
+                    manga.title,
+                )
+                return 0
 
         # Download images in parallel using ThreadPoolExecutor
         downloaded = 0

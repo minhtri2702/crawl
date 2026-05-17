@@ -65,14 +65,12 @@ CREATE TABLE IF NOT EXISTS manga_genre (
 CREATE INDEX IF NOT EXISTS ix_manga_genre_manga_id ON manga_genre(manga_id);
 CREATE INDEX IF NOT EXISTS ix_manga_genre_genre_id ON manga_genre(genre_id);
 
--- Chapter image table (for future use)
+-- Chapter image table
 CREATE TABLE IF NOT EXISTS chapter_image (
-    id SERIAL PRIMARY KEY,
     chapter_id INTEGER NOT NULL REFERENCES chapter(id) ON DELETE CASCADE,
+    page_order INTEGER NOT NULL DEFAULT 0,
     image_url VARCHAR(2000) NOT NULL,
     image_path VARCHAR(1000),
-    page_order INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chapter_id, page_order)
 );
-
-CREATE INDEX IF NOT EXISTS ix_chapter_image_chapter_id ON chapter_image(chapter_id);
