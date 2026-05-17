@@ -47,21 +47,19 @@ class Chapter(Base):
 class ChapterImage(Base):
     """
     Represents an image within a chapter.
-    Used in the next phase when crawling chapter detail pages.
+    Uses composite primary key (chapter_id, page_order).
     """
 
     __tablename__ = "chapter_image"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
     chapter_id = Column(
         Integer,
         ForeignKey("chapter.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        primary_key=True,
     )
+    page_order = Column(Integer, primary_key=True, default=0)
     image_url = Column(String(2000), nullable=False)
     image_path = Column(String(1000), nullable=True)
-    page_order = Column(Integer, nullable=False, default=0)
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -72,6 +70,6 @@ class ChapterImage(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<ChapterImage(id={self.id}, chapter_id={self.chapter_id}, "
+            f"<ChapterImage(chapter_id={self.chapter_id}, "
             f"page_order={self.page_order})>"
         )

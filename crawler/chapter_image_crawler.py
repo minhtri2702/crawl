@@ -327,6 +327,7 @@ class ChapterImageCrawler:
         """
         Crawl a single chapter page by chapter number and download all images.
         Saves image metadata to chapter_image table.
+        Images are uploaded directly to MinIO (no local storage).
 
         Args:
             manga: The Manga object.
@@ -338,18 +339,19 @@ class ChapterImageCrawler:
         Returns:
             Number of images downloaded.
         """
-        chapter_dir = os.path.join(
-            self.data_path,
-            manga_slug,
-            f"chap-{chapter_number}",
+        # Check if chapter already has images in DB
+        existing_images = (
+            db.query(ChapterImage)
+            .join(Chapter)
+            .filter(
+                Chapter.manga_id == manga.id,
+                Chapter.chapter_number == float(chapter_number),
+            )
+            .count()
         )
-        os.makedirs(chapter_dir, exist_ok=True)
-
-        # Check if chapter already has images downloaded
-        existing_images = self._count_existing_images(chapter_dir)
         if existing_images > 0:
             logger.info(
-                "  Chapter %d already has %d images on disk, skipping",
+                "  Chapter %d already has %d images in DB, skipping",
                 chapter_number,
                 existing_images,
             )
@@ -484,9 +486,6 @@ class ChapterImageCrawler:
         download_tasks = []
         for idx, img_url in enumerate(image_urls):
             page_num = idx + 1
-            ext = self._get_extension(img_url)
-            filename = f"{page_num}{ext}"
-            filepath = os.path.join(chapter_dir, filename)
 
             # Check if this image already exists in DB
             existing_image = (
@@ -504,44 +503,28 @@ class ChapterImageCrawler:
                 downloaded += 1
                 continue
 
-            if os.path.exists(filepath):
-                logger.debug(
-                    "  Image %d already exists on disk: %s",
-                    page_num,
-                    filepath,
-                )
-                downloaded += 1
-                # Still save to DB if not there
-                chapter_image = ChapterImage(
-                    chapter_id=chapter_record.id,
-                    image_url=img_url,
-                    image_path=filepath,
-                    page_order=page_num,
-                )
-                db.add(chapter_image)
-                continue
-
-            download_tasks.append((img_url, filepath, page_num))
+            download_tasks.append((img_url, page_num))
 
         # Download remaining images in parallel
         if download_tasks:
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 future_to_info = {
                     executor.submit(
-                        self._download_image, url, path, num,
+                        self._download_image, url, num,
                         manga_slug, chapter_number,
-                    ): (url, path, num)
-                    for url, path, num in download_tasks
+                    ): (url, num)
+                    for url, num in download_tasks
                 }
                 for future in concurrent.futures.as_completed(future_to_info):
-                    img_url, filepath, page_num = future_to_info[future]
+                    img_url, page_num = future_to_info[future]
                     try:
-                        if future.result():
+                        result = future.result()
+                        if result:
                             downloaded += 1
                             chapter_image = ChapterImage(
                                 chapter_id=chapter_record.id,
                                 image_url=img_url,
-                                image_path=filepath,
+                                image_path=result,  # MinIO path
                                 page_order=page_num,
                             )
                             db.add(chapter_image)
@@ -570,8 +553,6 @@ class ChapterImageCrawler:
                 chapter_number,
                 e,
             )
-            # Even if DB commit fails, images are saved on disk.
-            # Return 0 so caller knows DB save failed and can retry later.
             downloaded = 0
 
         logger.info(
@@ -736,21 +717,21 @@ class ChapterImageCrawler:
         return True
 
     def _download_image(
-        self, image_url: str, filepath: str, page_num: int,
+        self, image_url: str, page_num: int,
         manga_slug: str = None, chapter_number: int = None,
-    ) -> bool:
+    ) -> Optional[str]:
         """
-        Download a single image and upload to MinIO if configured.
+        Download a single image and upload directly to MinIO (no local storage).
 
         Args:
             image_url: The image URL to download.
-            filepath: The local file path to save to.
             page_num: The page number (for logging).
             manga_slug: Slugified manga title (for MinIO path).
             chapter_number: Chapter number (for MinIO path).
 
         Returns:
-            True if download succeeded, False otherwise.
+            MinIO object path (e.g. "chapters/one-piece/chap-1/1.jpg")
+            if successful, None otherwise.
         """
         try:
             logger.debug(
@@ -776,19 +757,36 @@ class ChapterImageCrawler:
             )
             response.raise_for_status()
 
-            with open(filepath, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-            logger.debug("  Saved: %s", filepath)
-
-            # Upload to MinIO if configured
+            # Upload directly to MinIO from memory
+            # Path: {manga_slug}/chap-{chapter_number}/{filename}
+            # (same parent folder as cover image: {manga_slug}/{manga_slug}.jpg)
             if self.minio and manga_slug and chapter_number:
-                minio_object = f"chapters/{manga_slug}/chap-{chapter_number}/{os.path.basename(filepath)}"
-                self.minio.upload_file(filepath, minio_object)
-                logger.debug("  Uploaded to MinIO: %s", minio_object)
+                ext = self._get_extension(image_url)
+                filename = f"{page_num}{ext}"
+                minio_object = f"{manga_slug}/chap-{chapter_number}/{filename}"
 
-            return True
+                # Check if already exists on MinIO
+                if self.minio.object_exists(minio_object):
+                    logger.debug(
+                        "  Image %d already exists on MinIO: %s",
+                        page_num,
+                        minio_object,
+                    )
+                    return minio_object
+
+                self.minio.upload_bytes(
+                    data=response.content,
+                    object_name=minio_object,
+                    content_type=f"image/{ext.lstrip('.')}",
+                )
+                logger.debug("  Uploaded to MinIO: %s", minio_object)
+                return minio_object
+            else:
+                logger.warning(
+                    "  MinIO not configured, cannot save image %d",
+                    page_num,
+                )
+                return None
 
         except requests.RequestException as e:
             logger.error(
@@ -797,12 +795,14 @@ class ChapterImageCrawler:
                 image_url,
                 e,
             )
-            return False
-        except OSError as e:
+            return None
+        except Exception as e:
             logger.error(
-                "  Failed to save image %d: %s", page_num, e
+                "  Failed to upload image %d to MinIO: %s",
+                page_num,
+                e,
             )
-            return False
+            return None
 
     def _log_error(
         self,
