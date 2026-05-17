@@ -1,0 +1,25 @@
+2026-05-16 22:52:34,963 - WDM - INFO - ====== WebDriver manager ======
+2026-05-16 22:52:35,922 - WDM - INFO - Get LATEST chromedriver version for google-chrome
+2026-05-16 22:52:36,116 - WDM - INFO - Get LATEST chromedriver version for google-chrome
+2026-05-16 22:52:36,303 - WDM - INFO - Driver [C:\Users\minht\.wdm\drivers\chromedriver\win64\148.0.7778.167\chromedriver-win32/chromedriver.exe] found in cache
+2026-05-16 22:52:37,405 - crawler.driver - INFO - Chrome WebDriver created successfully
+2026-05-16 22:52:37,405 - crawler.detail_crawler - INFO - Crawling detail page: https://truyenqqko.com/truyen-tranh/ban-ngay-dao-hon-ban-dem-lai-duoc-xin-om-19693
+2026-05-16 22:53:00,699 - crawler.detail_crawler - INFO - Extracted detail for 'Ban Ngày Đào Hôn, Ban Đêm Lại Được Xin Ôm': 184 chapters, author=TruyenQQ, status=ongoing, genres=0, views=23617
+2026-05-16 22:53:00,716 - services.image_service - INFO - Downloading cover image: https://i.hinhhinh.com/ebook/190x247/ban-ngay-dao-hon-ban-dem-lai-duoc-xin-om_1753493678945.jpg?gt=hdfgdfg&mobile=2
+2026-05-16 22:53:01,009 - services.image_service - INFO - Cover uploaded to MinIO: ban-ngay-dao-hon-ban-dem-lai-duoc-xin-om/ban-ngay-dao-hon-ban-dem-lai-duoc-xin-om.jpg
+2026-05-16 22:53:02,140 - crawler.detail_crawler - INFO - Crawling detail page: https://truyenqqko.com/truyen-tranh/tro-thanh-than-trong-the-gioi-nhi-phan-22175
+2026-05-16 22:53:13,566 - crawler.detail_crawler - INFO - Extracted detail for 'Trở Thành Thần Trong Thế Giới Nhị Phân': 29 chapters, author=TruyenQQ, status=ongoing, genres=5, views=17792
+2026-05-16 22:53:13,626 - services.image_service - INFO - Downloading cover image: https://111.tintruyen.net/ebook/190x247/hinhhinh111_tro-thanh-than-trong-the-gioi-nhi-phan_1761221085615.jpg?gt=hdfgdfg&mobile=2
+2026-05-16 22:53:13,852 - services.image_service - INFO - Cover uploaded to MinIO: tro-thanh-than-trong-the-gioi-nhi-phan/tro-thanh-than-trong-the-gioi-nhi-phan.jpg
+2026-05-16 22:53:14,867 - crawler.detail_crawler - INFO - Crawling detail page: https://truyenqqko.com/truyen-tranh/ngoi-sao-am-thuc-michelin-star-400
+2026-05-16 22:53:28,334 - crawler.detail_crawler - INFO - Extracted detail for 'Ngôi Sao Ẩm Thực Michelin Star': 271 chapters, author=Kim Song, status=ongoing, genres=4, views=550994
+2026-05-16 22:53:28,530 - services.image_service - INFO - Downloading cover image: https://i.hinhhinh.com/ebook/190x247/michelin-star_1552460605.jpg?gt=hdfgdfg&mobile=2
+2026-05-16 22:53:28,856 - services.image_service - INFO - Cover uploaded to MinIO: ngoi-sao-am-thuc-michelin-star/ngoi-sao-am-thuc-michelin-star.jpg
+2026-05-16 22:53:29,865 - crawler.detail_crawler - INFO - Crawling detail page: https://truyenqqko.com/truyen-tranh/tro-thanh-than-trong-the-gioi-nhi-phan-22186
+2026-05-16 22:54:11,843 - crawler.detail_crawler - INFO - Extracted detail for 'Trở Thành Thần Trong Thế Giới Nhị Phân': 29 chapters, author=Ngày tạo, status=ongoing, genres=3, views=89712
+2026-05-16 22:54:11,954 - services.image_service - INFO - Cover already exists on MinIO, skipping: tro-thanh-than-trong-the-gioi-nhi-phan/tro-thanh-than-trong-the-gioi-nhi-phan.jpg
+2026-05-16 22:54:12,971 - crawler.detail_crawler - INFO - Crawling detail page: https://truyenqqko.com/truyen-tranh/rung-dong-co-toan-tinh-23465
+2026-05-16 22:54:35,195 - crawler.detail_crawler - INFO - Extracted detail for 'Rung Động Có Toan Tính': 38 chapters, author=TruyenQQ, status=ongoing, genres=0, views=15591
+2026-05-16 22:54:35,304 - services.image_service - INFO - Downloading cover image: https://i178.hinhhinh.com/ebook/190x247/i178truyenvua_rung-dong-co-toan-tinh_1774176232697.jpg?gt=hdfgdfg&mobile=2
+2026-05-16 22:54:35,557 - services.image_service - INFO - Cover uploaded to MinIO: rung-dong-co-toan-tinh/rung-dong-co-toan-tinh.jpg
+2026-05-16 22:54:36,575 - crawler.detail_crawler - INFO - Crawling detail page: https://truyenqqko.com/truyen-tranh/trieu-hoi-su-cuoi-cung-9182
