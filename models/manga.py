@@ -46,6 +46,10 @@ class Manga(Base):
         Integer, nullable=True, default=0,
         comment="Highest chapter number that has been crawled for images"
     )
+    min_chapter_crawled = Column(
+        Integer, nullable=True, default=0,
+        comment="Lowest chapter number that has been crawled for images"
+    )
 
     created_at = Column(
         DateTime(timezone=True),

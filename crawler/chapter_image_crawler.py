@@ -4,15 +4,15 @@ Visits each chapter page, extracts all manga images, and downloads them
 in order to: data/{manga_slug}/chap-{chapter_number}/
 
 Strategy:
-1. Get max chapter number from DB (from chapter table)
-2. Get max_chapter_crawled from manga table (highest chapter already crawled for images)
-3. Determine which chapters to crawl:
-   - If max_chapters_per_manga is set: crawl that many latest chapters
-     (from max_chapter down to max_chapter - N + 1)
-   - If max_chapters_per_manga is None: crawl all chapters from max_chapter
-     down to max_chapter_crawled + 1 (only new chapters)
+1. Get min and max chapter numbers from DB (from chapter table)
+2. Get max_chapter_crawled and min_chapter_crawled from manga table
+3. Determine which chapters to crawl (crawl from bottom up):
+   - If max_chapters_per_manga is set: crawl that many chapters starting
+     from min_chapter_crawled + 1 upward
+   - If max_chapters_per_manga is None: crawl all chapters from
+     min_chapter_crawled + 1 up to max_chapter_crawled + 1 (only new chapters)
 4. Save image info to chapter_image table in DB
-5. Update manga.max_chapter_crawled after successful crawl
+5. Update manga.max_chapter_crawled and manga.min_chapter_crawled after successful crawl
 """
 
 from __future__ import annotations
@@ -83,22 +83,26 @@ class ChapterImageCrawler:
         """
         Crawl chapter images for all manga (or specified manga IDs).
 
+        Strategy: crawl from bottom up (from min chapter to max chapter).
+        - max_chapter_crawled: highest chapter number that has images in DB
+        - min_chapter_crawled: lowest chapter number that has images in DB
+
         For each manga:
           - Retry previously failed chapters (from crawl_error_log)
-          - Get max chapter number from chapter table
-          - Get max_chapter_crawled from manga table
-          - Determine range:
-            * If max_chapters_per_manga is set: crawl N latest chapters
-              (from max_chapter down to max_chapter - N + 1)
-            * If max_chapters_per_manga is None: crawl from max_chapter
-              down to max_chapter_crawled + 1 (only new chapters)
+          - Get min and max chapter numbers from chapter table
+          - Determine range (crawl from bottom up):
+            * If max_chapters_per_manga is set: crawl N chapters starting
+              from min_chapter_crawled + 1 upward
+            * If max_chapters_per_manga is None: crawl all chapters from
+              min_chapter_crawled + 1 up to max_chapter_crawled + 1
+              (only new chapters not yet crawled)
           - Save image info to DB
-          - Update manga.max_chapter_crawled
+          - Update manga.max_chapter_crawled and manga.min_chapter_crawled
 
         Args:
             manga_ids: Optional list of manga UUIDs to process.
                        If None, process all manga.
-            max_chapters_per_manga: Number of latest chapters to crawl per manga.
+            max_chapters_per_manga: Number of chapters to crawl per manga.
                                     If None, crawl all chapters that haven't
                                     been crawled yet.
 
@@ -157,57 +161,84 @@ class ChapterImageCrawler:
                     stats["images_downloaded"] += retry_stats["images_downloaded"]
                     stats["chapters_processed"] += retry_stats["chapters_processed"]
 
-                    # Step 2: Get max chapter number from DB
-                    max_chapter = (
-                        db.query(Chapter)
+                    # Step 2: Get min and max chapter numbers from DB
+                    from sqlalchemy import func
+
+                    min_chapter = (
+                        db.query(func.min(Chapter.chapter_number))
                         .filter(Chapter.manga_id == manga.id)
-                        .order_by(Chapter.chapter_number.desc())
-                        .first()
+                        .scalar()
+                    )
+                    max_chapter = (
+                        db.query(func.max(Chapter.chapter_number))
+                        .filter(Chapter.manga_id == manga.id)
+                        .scalar()
                     )
 
-                    if not max_chapter:
+                    if not min_chapter or not max_chapter:
                         logger.info(
                             "  No chapters found for manga %s", manga.title
                         )
                         continue
 
-                    max_chap_num = int(max_chapter.chapter_number)
-                    already_crawled = manga.max_chapter_crawled or 0
+                    min_chap_num = int(min_chapter)
+                    max_chap_num = int(max_chapter)
+                    max_crawled = manga.max_chapter_crawled or 0
+                    min_crawled = manga.min_chapter_crawled or 0
 
                     logger.info(
-                        "  Max chapter in DB: %d, Already crawled up to: %d",
+                        "  Chapters in DB: %d-%d, Crawled images: %d-%d",
+                        min_chap_num,
                         max_chap_num,
-                        already_crawled,
+                        min_crawled,
+                        max_crawled,
                     )
 
-                    # Determine the range of chapters to crawl
+                    # Determine the range of chapters to crawl (from bottom up)
                     if max_chapters_per_manga is not None:
-                        # Crawl N latest chapters (from max down)
-                        start_chap = max_chap_num
-                        end_chap = max(1, max_chap_num - max_chapters_per_manga + 1)
+                        # Crawl N chapters starting from min_crawled + 1 upward
+                        start_chap = min_crawled + 1
+                        end_chap = min(
+                            min_crawled + max_chapters_per_manga,
+                            max_chap_num,
+                        )
+                        if start_chap > end_chap:
+                            logger.info(
+                                "  All chapters already crawled (min_crawled=%d, max=%d). Skipping.",
+                                min_crawled,
+                                max_chap_num,
+                            )
+                            continue
                         logger.info(
-                            "  Mode: crawl %d latest chapters (%d down to %d)",
+                            "  Mode: crawl %d chapters (%d up to %d)",
                             max_chapters_per_manga,
                             start_chap,
                             end_chap,
                         )
                     else:
-                        # Crawl only new chapters (from max down to already_crawled + 1)
-                        if max_chap_num <= already_crawled:
+                        # Crawl all chapters from min_crawled + 1 up to max_crawled + 1
+                        # This covers both new chapters and gaps
+                        start_chap = min_crawled + 1
+                        end_chap = max_crawled + 1
+
+                        if start_chap > max_chap_num:
                             logger.info(
-                                "  All chapters already crawled (max=%d, crawled=%d). Skipping.",
+                                "  All chapters already crawled (min_crawled=%d, max_crawled=%d, max_chap=%d). Skipping.",
+                                min_crawled,
+                                max_crawled,
                                 max_chap_num,
-                                already_crawled,
                             )
                             continue
 
-                        start_chap = max_chap_num
-                        end_chap = already_crawled + 1
+                        # Don't go beyond max chapter in DB
+                        if end_chap > max_chap_num:
+                            end_chap = max_chap_num
+
                         logger.info(
-                            "  Mode: crawl new chapters (%d down to %d, %d chapters)",
+                            "  Mode: crawl new chapters (%d up to %d, %d chapters)",
                             start_chap,
                             end_chap,
-                            start_chap - end_chap + 1,
+                            end_chap - start_chap + 1,
                         )
 
                     # Get chapter records from DB for the range we need to crawl
@@ -215,25 +246,25 @@ class ChapterImageCrawler:
                         db.query(Chapter)
                         .filter(
                             Chapter.manga_id == manga.id,
-                            Chapter.chapter_number.between(end_chap, start_chap),
+                            Chapter.chapter_number.between(start_chap, end_chap),
                         )
-                        .order_by(Chapter.chapter_number.desc())
+                        .order_by(Chapter.chapter_number.asc())
                         .all()
                     )
 
                     if not chapter_records:
                         logger.info(
                             "  No chapter records found in DB for range %d-%d. Skipping.",
-                            end_chap,
                             start_chap,
+                            end_chap,
                         )
                         continue
 
                     logger.info(
                         "  Found %d chapter records in DB for range %d-%d",
                         len(chapter_records),
-                        end_chap,
                         start_chap,
+                        end_chap,
                     )
 
                     chapter_count = 0
@@ -271,19 +302,37 @@ class ChapterImageCrawler:
                                 pass
                             continue
 
-                    # Update max_chapter_crawled after processing all chapters
+                    # Update max_chapter_crawled and min_chapter_crawled
+                    # based on actual images in DB across the entire manga
                     if chapter_count > 0:
-                        manga.max_chapter_crawled = max_chap_num
+                        # Query actual min and max chapter numbers that have images
+                        img_stats = (
+                            db.query(
+                                func.min(Chapter.chapter_number),
+                                func.max(Chapter.chapter_number),
+                            )
+                            .join(ChapterImage)
+                            .filter(Chapter.manga_id == manga.id)
+                            .first()
+                        )
+                        if img_stats and img_stats[0] is not None:
+                            manga.min_chapter_crawled = int(img_stats[0])
+                            manga.max_chapter_crawled = int(img_stats[1])
+                        else:
+                            # Fallback: use the range we attempted
+                            manga.min_chapter_crawled = start_chap
+                            manga.max_chapter_crawled = end_chap
                         db.commit()
                         logger.info(
-                            "  Updated max_chapter_crawled to %d for '%s'",
-                            max_chap_num,
+                            "  Updated min_chapter_crawled=%d, max_chapter_crawled=%d for '%s'",
+                            manga.min_chapter_crawled,
+                            manga.max_chapter_crawled,
                             manga.title,
                         )
 
                     stats["manga_processed"] += 1
                     logger.info(
-                        "  Completed %d chapters for '%s' (from %d down to %d)",
+                        "  Completed %d chapters for '%s' (from %d up to %d)",
                         chapter_count,
                         manga.title,
                         start_chap,
