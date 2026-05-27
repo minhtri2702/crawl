@@ -175,7 +175,7 @@ class ChapterImageCrawler:
                         .scalar()
                     )
 
-                    if not min_chapter or not max_chapter:
+                    if min_chapter is None or max_chapter is None:
                         logger.info(
                             "  No chapters found for manga %s", manga.title
                         )
@@ -185,6 +185,9 @@ class ChapterImageCrawler:
                     max_chap_num = int(max_chapter)
                     max_crawled = manga.max_chapter_crawled or 0
                     min_crawled = manga.min_chapter_crawled or 0
+                    # Handle -1 sentinel value (set by job.py to mark "being crawled")
+                    if min_crawled < 0:
+                        min_crawled = 0
 
                     logger.info(
                         "  Chapters in DB: %d-%d, Crawled images: %d-%d",
@@ -193,6 +196,14 @@ class ChapterImageCrawler:
                         min_crawled,
                         max_crawled,
                     )
+
+                    # If manga has no chapters in DB at all (min_chapter is None), skip
+                    if min_chapter is None:
+                        logger.info(
+                            "  No chapters in DB for '%s'. Skipping chapter image crawl.",
+                            manga.title,
+                        )
+                        continue
 
                     # Determine the range of chapters to crawl (from bottom up)
                     if max_chapters_per_manga is not None:
@@ -203,12 +214,18 @@ class ChapterImageCrawler:
                             max_chap_num,
                         )
                         if start_chap > end_chap:
-                            logger.info(
-                                "  All chapters already crawled (min_crawled=%d, max=%d). Skipping.",
-                                min_crawled,
-                                max_chap_num,
-                            )
-                            continue
+                            # Edge case: chapter_number = 0 (Oneshot)
+                            # int(0.0) = 0, so max_chap_num = 0, but there IS a chapter
+                            if max_chap_num == 0 and min_chap_num == 0:
+                                start_chap = 0
+                                end_chap = 0
+                            else:
+                                logger.info(
+                                    "  All chapters already crawled (min_crawled=%d, max=%d). Skipping.",
+                                    min_crawled,
+                                    max_chap_num,
+                                )
+                                continue
                         logger.info(
                             "  Mode: crawl %d chapters (%d up to %d)",
                             max_chapters_per_manga,
@@ -222,13 +239,18 @@ class ChapterImageCrawler:
                         end_chap = max_crawled + 1
 
                         if start_chap > max_chap_num:
-                            logger.info(
-                                "  All chapters already crawled (min_crawled=%d, max_crawled=%d, max_chap=%d). Skipping.",
-                                min_crawled,
-                                max_crawled,
-                                max_chap_num,
-                            )
-                            continue
+                            # Edge case: chapter_number = 0 (Oneshot)
+                            if max_chap_num == 0 and min_chap_num == 0:
+                                start_chap = 0
+                                end_chap = 0
+                            else:
+                                logger.info(
+                                    "  All chapters already crawled (min_crawled=%d, max_crawled=%d, max_chap=%d). Skipping.",
+                                    min_crawled,
+                                    max_crawled,
+                                    max_chap_num,
+                                )
+                                continue
 
                         # Don't go beyond max chapter in DB
                         if end_chap > max_chap_num:
@@ -327,6 +349,15 @@ class ChapterImageCrawler:
                             "  Updated min_chapter_crawled=%d, max_chapter_crawled=%d for '%s'",
                             manga.min_chapter_crawled,
                             manga.max_chapter_crawled,
+                            manga.title,
+                        )
+                    elif manga.min_chapter_crawled < 0:
+                        # All chapters failed, reset sentinel -1 back to 0
+                        # so it can be retried later
+                        manga.min_chapter_crawled = 0
+                        db.commit()
+                        logger.info(
+                            "  All chapters failed for '%s', reset min_chapter_crawled from -1 to 0",
                             manga.title,
                         )
 
@@ -826,7 +857,7 @@ class ChapterImageCrawler:
             # Upload directly to MinIO from memory
             # Path: {manga_slug}/chap-{chapter_number}/{filename}
             # (same parent folder as cover image: {manga_slug}/{manga_slug}.jpg)
-            if self.minio and manga_slug and chapter_number:
+            if self.minio is not None and manga_slug is not None and chapter_number is not None:
                 ext = self._get_extension(image_url)
                 filename = f"{page_num}{ext}"
                 minio_object = f"{manga_slug}/chap-{chapter_number}/{filename}"
@@ -849,8 +880,11 @@ class ChapterImageCrawler:
                 return minio_object
             else:
                 logger.warning(
-                    "  MinIO not configured, cannot save image %d",
+                    "  MinIO not configured, cannot save image %d (self.minio=%s, manga_slug=%s, chapter_number=%s)",
                     page_num,
+                    self.minio,
+                    manga_slug,
+                    chapter_number,
                 )
                 return None
 

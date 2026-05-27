@@ -10,47 +10,58 @@ Hệ thống crawler tự động thu thập dữ liệu manga từ [truyenqqko.
 
 ```
 crawl/
-├── crawler/                  # Các module crawler
+├── crawler/                      # Các module crawler
 │   ├── __init__.py
-│   ├── coordinator.py        # Điều phối toàn bộ quy trình crawl
-│   ├── listing_crawler.py    # Crawl trang danh sách manga
-│   ├── detail_crawler.py     # Crawl trang chi tiết manga
-│   ├── chapter_image_crawler.py  # Crawl hình ảnh chapter
-│   └── driver.py             # Quản lý Selenium WebDriver
-├── db/                       # Database
+│   ├── coordinator.py            # Điều phối toàn bộ quy trình crawl
+│   ├── listing_crawler.py        # Crawl trang danh sách manga
+│   ├── detail_crawler.py         # Crawl trang chi tiết manga
+│   ├── chapter_image_crawler.py  # Crawl hình ảnh chapter (1116 dòng)
+│   └── driver.py                 # Quản lý Selenium WebDriver
+├── db/                           # Database
 │   ├── __init__.py
-│   ├── config.py             # Cấu hình database từ biến môi trường
-│   └── session.py            # SQLAlchemy engine & session management
-├── models/                   # SQLAlchemy ORM models
+│   ├── config.py                 # Cấu hình database từ biến môi trường
+│   └── session.py                # SQLAlchemy engine & session management
+├── models/                       # SQLAlchemy ORM models
 │   ├── __init__.py
-│   ├── manga.py              # Model Manga
-│   ├── chapter.py            # Model Chapter & ChapterImage
-│   ├── genre.py              # Model Genre & bảng trung gian manga_genre
-│   └── crawl_error_log.py    # Model log lỗi crawl
-├── services/                 # Business logic layer
+│   ├── manga.py                  # Model Manga
+│   ├── chapter.py                # Model Chapter & ChapterImage
+│   ├── genre.py                  # Model Genre & bảng trung gian manga_genre
+│   └── crawl_error_log.py        # Model log lỗi crawl
+├── services/                     # Business logic layer
 │   ├── __init__.py
-│   ├── manga_service.py      # CRUD operations cho manga & chapters
-│   ├── image_service.py      # Download & upload ảnh bìa
-│   └── minio_service.py      # Kết nối MinIO object storage
-├── utils/                    # Tiện ích
+│   ├── manga_service.py          # CRUD operations cho manga & chapters
+│   ├── image_service.py          # Download & upload ảnh bìa lên MinIO
+│   └── minio_service.py          # Kết nối MinIO object storage
+├── utils/                        # Tiện ích
 │   ├── __init__.py
-│   ├── helpers.py            # Slugify, retry decorator, URL utils
-│   └── logging_setup.py      # Cấu hình logging
-├── data/                     # Thư mục chứa dữ liệu tải về
-├── logs/                     # Log files
-├── main.py                   # Entry point chính
-├── Dockerfile                # Docker image definition
-├── docker-compose.yml        # Docker Compose configuration
-├── requirements.txt          # Python dependencies
-├── init_db.sql               # SQL khởi tạo database
-├── run_migration.py          # Chạy migration
+│   ├── helpers.py                # Slugify, retry decorator, URL utils
+│   └── logging_setup.py          # Cấu hình logging
+├── data/                         # Thư mục chứa dữ liệu tải về (slugified)
+├── logs/                         # Log files
+├── main.py                       # Entry point chính (374 dòng)
+├── job.py                        # Script chạy multi-terminal crawl (36 dòng)
+├── Dockerfile                    # Docker image definition
+├── docker-compose.yml            # Docker Compose configuration
+├── requirements.txt              # Python dependencies
+├── init_db.sql                   # SQL khởi tạo database
+├── run_migration.py              # Chạy migration tự động
 ├── migration_add_stt_sequence.sql
 ├── migration_add_crawl_error_log.sql
 ├── migration_add_max_chapter_crawled.sql
-├── migration_remove_stt.sql
-├── test_db.py                # Script test kết nối database
-├── DOCUMENTATION.md          # Tài liệu mã nguồn (file này)
-└── .env.example              # Template biến môi trường
+├── migration_add_min_chapter_crawled.sql
+├── migration_remove_chapter_image_id.sql
+├── migration_reset_chapter_image.sql
+├── migration_rollback_chapter_image.sql
+├── test_db.py                    # Script test kết nối database
+├── test_crawl.py                 # Script test listing crawler
+├── test_source.py                # Script test source loading
+├── update_min.py                 # Script update min_chapter_crawled
+├── DOCUMENTATION.md              # Tài liệu mã nguồn (file này)
+├── .env.example                  # Template biến môi trường
+├── .gitignore
+├── detail.html                   # HTML mẫu cho detail page
+├── page.html                     # HTML mẫu cho listing page
+└── redownload_output.txt         # Output log tải lại
 ```
 
 ---
@@ -89,6 +100,8 @@ python main.py --mode full          # Crawl toàn bộ
 - `--chapters N`: Số chapter mới nhất cần crawl mỗi manga
 - `--no-headless`: Chạy browser ở chế độ có giao diện
 - `--manga-id UUID`: Chỉ crawl chapter cho manga có UUID cụ thể
+- `--manga-stt N`: Chỉ crawl chapter cho manga có STT cụ thể (dùng trong `job.py`)
+- `--min-chapters N`: Số chapter cũ nhất cần crawl (dùng với `min_chapter_crawled`)
 
 ---
 
@@ -197,11 +210,18 @@ python main.py --mode full          # Crawl toàn bộ
 **Chiến lược crawl:**
 1. Lấy `max_chapter` từ bảng `chapter` (chapter cao nhất trong DB)
 2. Lấy `max_chapter_crawled` từ bảng `manga` (chapter đã crawl ảnh cao nhất)
-3. Xác định range chapter cần crawl:
-   - Nếu `max_chapters_per_manga` được set: crawl N chapter mới nhất
+3. Lấy `min_chapter_crawled` từ bảng `manga` (chapter đã crawl ảnh thấp nhất, mặc định = 0)
+4. Xác định range chapter cần crawl:
+   - Nếu `max_chapters_per_manga` được set: crawl N chapter mới nhất (từ `max_chapter` xuống)
    - Nếu `max_chapters_per_manga` là None: crawl từ `max_chapter` xuống `max_chapter_crawled + 1`
-4. Lưu thông tin ảnh vào bảng `chapter_image`
-5. Update `manga.max_chapter_crawled`
+   - Nếu `min_chapters_per_manga` được set: crawl N chapter cũ nhất (từ `min_chapter_crawled + 1` lên)
+5. Lưu thông tin ảnh vào bảng `chapter_image`
+6. Update `manga.max_chapter_crawled` và `manga.min_chapter_crawled`
+
+**Hai hướng crawl:**
+- **Crawl xuôi (forward):** Dùng `--min-chapters` → crawl từ chapter nhỏ lên lớn, update `min_chapter_crawled`
+- **Crawl ngược (backward):** Dùng `--chapters` → crawl từ chapter lớn xuống nhỏ, update `max_chapter_crawled`
+- **Crawl toàn bộ:** Không set `--chapters` hoặc `--min-chapters` → crawl tất cả chapter chưa có ảnh
 
 **Phương thức chính:**
 - `crawl_all_manga_chapters(manga_ids, max_chapters_per_manga)`: Crawl chapter images cho tất cả manga
@@ -250,7 +270,7 @@ python main.py --mode full          # Crawl toàn bộ
 **Class:** `DatabaseConfig`
 
 **Properties:**
-- `host`: DB_HOST (default: `100.94.58.103`)
+- `host`: DB_HOST (default: `100.98.146.27`)
 - `port`: DB_PORT (default: `5433`)
 - `database`: DB_NAME (default: `crawler_db`)
 - `username`: DB_USER (default: `crawler_admin`)
@@ -298,7 +318,9 @@ python main.py --mode full          # Crawl toàn bộ
 | `likes` | BIGINT | Lượt thích |
 | `followers` | BIGINT | Lượt theo dõi |
 | `views` | BIGINT | Lượt xem |
+| `stt` | Integer (UNIQUE) | Số thứ tự tự tăng (dùng sequence) |
 | `max_chapter_crawled` | Integer | Chapter cao nhất đã crawl ảnh |
+| `min_chapter_crawled` | Integer | Chapter thấp nhất đã crawl ảnh |
 | `created_at` | TIMESTAMPTZ | Thời gian tạo |
 | `updated_at` | TIMESTAMPTZ | Thời gian cập nhật |
 
@@ -448,6 +470,118 @@ python main.py --mode full          # Crawl toàn bộ
 
 ---
 
+### 15. `job.py` - Multi-Terminal Crawl Script
+
+**Mô tả:** Script chạy nhiều terminal cùng lúc để crawl chapter images song song cho nhiều manga khác nhau.
+
+**Cách hoạt động:**
+1. Query database lấy các manga chưa crawl (`min_chapter_crawled == 0`)
+2. Sắp xếp theo số chapter giảm dần (ưu tiên manga nhiều chapter nhất)
+3. Giới hạn số lượng worker (`NUM_WORKERS = 17`)
+4. Mở terminal riêng cho mỗi manga với lệnh `python main.py --mode chapters --manga-stt {stt} --chapters 3883`
+
+**Cấu hình:**
+```python
+NUM_WORKERS = 17  # Số terminal tối đa mở cùng lúc
+```
+
+**⚠️ Vấn đề chạy trùng (Race Condition):**
+
+Nếu chạy `job.py` 2 lần liên tiếp, các manga có thể bị **crawl trùng lặp**. Nguyên nhân:
+
+1. `job.py` query `min_chapter_crawled == 0` và mở terminal ngay, **không update** `min_chapter_crawled` trước
+2. `min_chapter_crawled` chỉ được update sau khi `main.py` chạy xong (có thể mất nhiều phút)
+3. **Không có cơ chế lock** (file lock, database lock, hay singleton) để ngăn chạy trùng
+
+**Kịch bản lỗi:**
+```
+Lần 1: job.py query → thấy manga A (min_chapter_crawled=0) → mở terminal crawl A
+Lần 2: job.py query → vẫn thấy manga A (min_chapter_crawled=0, chưa kịp update) → mở terminal crawl A nữa
+→ Kết quả: 2 terminal cùng crawl manga A!
+```
+
+**Giải pháp đã implement (update `min_chapter_crawled = -1`):**
+
+`job.py` hiện đã được fix bằng cách:
+1. Query các manga có `min_chapter_crawled == 0`
+2. **Update ngay** `min_chapter_crawled = -1` cho các manga đó (đánh dấu đang crawl)
+3. `commit()` ngay lập tức
+4. Sau đó mới mở terminal
+
+Khi `main.py` chạy xong, `chapter_image_crawler.py` sẽ update `min_chapter_crawled` thành giá trị thực tế (vd: 1, 2, ...) dựa trên số chapter đã crawl được.
+
+**Xử lý sentinel value (-1) trong `chapter_image_crawler.py`:**
+```python
+min_crawled = manga.min_chapter_crawled or 0
+if min_crawled < 0:
+    min_crawled = 0  # Treat -1 as "not crawled yet"
+```
+
+**Kết quả:**
+- Lần 1: `job.py` query → thấy manga A (min_chapter_crawled=0) → set thành -1 → mở terminal
+- Lần 2: `job.py` query → manga A có min_chapter_crawled=-1 → **không được chọn** ✅
+- Sau khi crawl xong: `min_chapter_crawled` được update thành giá trị thực ✅
+
+**Xử lý trường hợp crawl bị lỗi giữa chừng:**
+
+Giả sử `job.py` set `min_chapter_crawled = -1`, sau đó `main.py` crawl chapter 1→30 nhưng chapter 30 bị lỗi:
+
+| Kịch bản | `min_chapter_crawled` sau khi crawl | Giải thích |
+|----------|--------------------------------------|------------|
+| Chapter 1-29 thành công, 30 lỗi | `= 1` (dựa trên chapter có ảnh thực tế) | Query `MIN(chapter_number)` từ `chapter_image` |
+| Tất cả chapter đều lỗi (0 thành công) | `= 0` (reset từ -1 về 0) | `elif manga.min_chapter_crawled < 0:` → set về 0 để retry sau |
+| Tất cả thành công | `= 1` (chapter nhỏ nhất có ảnh) | Query `MIN(chapter_number)` từ `chapter_image` |
+
+**Lưu ý:** Nếu chapter 30 lỗi, nó được log vào `crawl_error_log`. Lần chạy `main.py` tiếp theo, `_retry_failed_chapters()` sẽ thử lại chapter 30 trước khi crawl chapter mới.
+
+**Lưu ý:** Script này dùng `subprocess.call` với `start` command trên Windows để mỗi terminal chạy độc lập.
+
+---
+
+### 16. `run_migration.py` - Database Migration Runner
+
+**Mô tả:** Script chạy các migration SQL tự động.
+
+**Các migration được định nghĩa:**
+1. **add_max_chapter_crawled**: Thêm cột `max_chapter_crawled INTEGER DEFAULT 0` vào bảng `manga`
+2. **add_crawl_error_log**: Tạo bảng `crawl_error_log` để log lỗi crawl
+3. **add_crawl_error_log_indexes**: Tạo indexes cho bảng `crawl_error_log`
+
+**Cách chạy:**
+```bash
+python run_migration.py
+```
+
+---
+
+### 17. SQL Migration Files
+
+Các file SQL migration riêng lẻ để chạy thủ công khi cần:
+
+| File | Mục đích |
+|------|----------|
+| `init_db.sql` | Khởi tạo toàn bộ database schema (bảng, indexes, sequences) |
+| `migration_add_stt_sequence.sql` | Tạo sequence `manga_stt_seq` cho STT tự tăng |
+| `migration_add_max_chapter_crawled.sql` | Thêm cột `max_chapter_crawled` |
+| `migration_add_min_chapter_crawled.sql` | Thêm cột `min_chapter_crawled` và khởi tạo dữ liệu |
+| `migration_add_crawl_error_log.sql` | Tạo bảng `crawl_error_log` với indexes |
+| `migration_remove_chapter_image_id.sql` | Đổi PK của `chapter_image` từ `id` sang composite `(chapter_id, page_order)` |
+| `migration_reset_chapter_image.sql` | Xóa dữ liệu `chapter_image` và reset `max_chapter_crawled` về 0 |
+| `migration_rollback_chapter_image.sql` | Khôi phục bảng `chapter_image` về cấu trúc cũ (có cột `id`) |
+
+---
+
+### 18. Test Scripts
+
+| File | Mô tả |
+|------|-------|
+| `test_db.py` | Kiểm tra kết nối database, đếm số manga, kiểm tra STT |
+| `test_crawl.py` | Test listing crawler với source config |
+| `test_source.py` | Test load source configuration |
+| `update_min.py` | Script một lần để cập nhật `min_chapter_crawled` cho dữ liệu cũ |
+
+---
+
 ## 🖼️ Cách Ảnh Được Lưu Trữ
 
 Hệ thống lưu trữ **2 loại ảnh** khác nhau, mỗi loại có cách lưu khác nhau:
@@ -577,16 +711,22 @@ main.py
        ├─ WebDriverFactory.create_driver()
        ├─ ChapterImageCrawler.crawl_all_manga_chapters()
        │    ├─ [for each manga]
-       │    │    ├─ _retry_failed_chapters()     # Thử lại chapter lỗi
-       │    │    ├─ Xác định range chapter cần crawl
-       │    │    ├─ [for each chapter]
+       │    │    ├─ _retry_failed_chapters()        # Thử lại chapter lỗi
+       │    │    ├─ Xác định range chapter cần crawl:
+       │    │    │   ├─ max_chapter = chapter cao nhất trong DB
+       │    │    │   ├─ max_chapter_crawled = chapter đã crawl cao nhất
+       │    │    │   ├─ min_chapter_crawled = chapter đã crawl thấp nhất
+       │    │    │   ├─ Nếu --chapters: crawl từ max_chapter xuống (N chapter)
+       │    │    │   ├─ Nếu --min-chapters: crawl từ min_chapter_crawled+1 lên (N chapter)
+       │    │    │   └─ Nếu không set: crawl tất cả chapter chưa có ảnh
+       │    │    ├─ [for each chapter in range]
        │    │    │    ├─ _crawl_chapter_by_number()
        │    │    │    │    ├─ driver.get(chapter_url)
        │    │    │    │    ├─ _wait_for_images()
        │    │    │    │    ├─ _extract_image_urls()
        │    │    │    │    └─ _download_image() (parallel)
        │    │    │    └─ Lưu ChapterImage records vào DB
-       │    │    └─ Update manga.max_chapter_crawled
+       │    │    └─ Update manga.max_chapter_crawled hoặc min_chapter_crawled
        │    └─ Log summary
        └─ WebDriverFactory.destroy_driver()
 ```
@@ -597,7 +737,7 @@ main.py
 
 | Biến | Mặc định | Mô tả |
 |------|---------|-------------|
-| `DB_HOST` | `100.94.58.103` | PostgreSQL host |
+| `DB_HOST` | `100.98.146.27` | PostgreSQL host |
 | `DB_PORT` | `5433` | PostgreSQL port |
 | `DB_NAME` | `crawler_db` | Database name |
 | `DB_USER` | `crawler_admin` | Database user |
